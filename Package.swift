@@ -7,14 +7,12 @@ let package = Package(
         .iOS(.v13)
     ],
     products: [
-        // То, что становятся видно внешним пользователям / проектам
         .library(
             name: "CentralMap",
             targets: ["CentralMap"]
         ),
     ],
     dependencies: [
-        // Зависимость от MapLibre по полному URL
         .package(
             url: "https://github.com/maplibre/maplibre-gl-native-distribution",
             from: "6.0.0"
