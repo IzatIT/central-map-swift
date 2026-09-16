@@ -3,13 +3,22 @@ import PackageDescription
 
 let package = Package(
     name: "CentralMap",
-    platforms: [.iOS(.v13)],
+    platforms: [
+        .iOS(.v13)
+    ],
     products: [
-        .library(name: "CentralMap", targets: ["CentralMap"]),
+        // То, что становятся видно внешним пользователям / проектам
+        .library(
+            name: "CentralMap",
+            targets: ["CentralMap"]
+        ),
     ],
     dependencies: [
-        // MapLibre Native iOS (SPM-дистрибутив). Модуль `import MapLibre`, классы MLN*.
-        .package(url: "https://github.com/maplibre/maplibre-gl-native-distribution", from: "6.0.0"),
+        // Зависимость от MapLibre по полному URL
+        .package(
+            url: "https://github.com/maplibre/maplibre-gl-native-distribution",
+            from: "6.0.0"
+        ),
     ],
     targets: [
         .target(
