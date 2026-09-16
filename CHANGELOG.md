@@ -1,3 +1,7 @@
+## 0.1.1
+
+- Карта без вотермарки MapLibre и кнопки (i) с атрибуцией — чистые углы под свой UI.
+
 ## 0.1.0
 
 - Первый выпуск: SwiftUI `CentralMap` (UIViewRepresentable) и `CentralMapController`

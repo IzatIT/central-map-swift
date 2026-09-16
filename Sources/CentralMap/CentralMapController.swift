@@ -41,6 +41,8 @@ public final class CentralMapController: NSObject, MLNMapViewDelegate {
         let mv = MLNMapView(frame: .zero, styleURL: url)
         mv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         mv.setCenter(center, zoomLevel: zoom, animated: false)
+        mv.logoView.isHidden = true          // без вотермарки MapLibre
+        mv.attributionButton.isHidden = true // без кнопки (i) с атрибуцией
         mv.delegate = self
         self.mapView = mv
         return mv
