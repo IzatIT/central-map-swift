@@ -14,7 +14,26 @@ public enum CentralMapError: Error {
     case badResponse
 }
 
-/// REST-клиент карты central.kg (поиск, маршруты, изохроны, POI-мета). Ключ (если задан)
+/// Сведения о карте с сервера (`GET /api/meta`): версию тайлов и масштабы берите отсюда, а не из кода.
+public struct CentralMapMeta {
+    /// Версия данных тайлов (`?v=` в адресе тайла), напр. `kz3`.
+    public let tilesVersion: String?
+    /// Наименьший масштаб, на котором есть тайлы.
+    public let minZoom: Double?
+    /// Наибольший масштаб тайлов (дальше карта увеличивает последний).
+    public let maxZoom: Double?
+    /// Ответ целиком (страны карты `countries`, дата данных `dataDate` и т. п.).
+    public let raw: [String: Any]
+
+    init(json j: [String: Any]) {
+        tilesVersion = (j["tilesVersion"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        minZoom = jsonNumber(j["minZoom"])
+        maxZoom = jsonNumber(j["maxZoom"])
+        raw = j
+    }
+}
+
+/// REST-клиент карты central.kg (поиск, маршруты, изохроны, POI-мета, meta). Ключ (если задан)
 /// уходит заголовком X-API-Key.
 @available(iOS 15.0, macOS 12.0, *)
 public final class CentralMapAPI {
@@ -41,6 +60,11 @@ public final class CentralMapAPI {
     /// Таксономия POI.
     public func poiMeta() async throws -> [[String: Any]] {
         (try await get("/poi-meta")) as? [[String: Any]] ?? []
+    }
+
+    /// Сведения о карте: версия тайлов, масштабы, страны (`GET /api/meta`, нужен ключ).
+    public func meta() async throws -> CentralMapMeta {
+        CentralMapMeta(json: (try await get("/meta")) as? [String: Any] ?? [:])
     }
 
     /// Маршрут (Valhalla). mode: car|foot|bike|scooter. Возвращает разобранный JSON.
@@ -80,17 +104,18 @@ public final class CentralMapAPI {
     }
 
     private static func hit(_ j: [String: Any]) -> CentralSearchHit {
-        let lat = num(j["lat"] ?? j["latitude"] ?? j["y"])
-        let lon = num(j["lon"] ?? j["lng"] ?? j["longitude"] ?? j["x"])
+        let lat = jsonNumber(j["lat"] ?? j["latitude"] ?? j["y"])
+        let lon = jsonNumber(j["lon"] ?? j["lng"] ?? j["longitude"] ?? j["x"])
         let coord = (lat != nil && lon != nil) ? CLLocationCoordinate2D(latitude: lat!, longitude: lon!) : nil
         let name = (j["name"] ?? j["label"] ?? j["title"]) as? String ?? ""
         return CentralSearchHit(name: name, coordinate: coord, type: (j["type"] ?? j["class"]) as? String, raw: j)
     }
+}
 
-    private static func num(_ v: Any?) -> Double? {
-        if let d = v as? Double { return d }
-        if let i = v as? Int { return Double(i) }
-        if let s = v as? String { return Double(s) }
-        return nil
-    }
+/// Число из JSON (nil — нет или не число).
+private func jsonNumber(_ v: Any?) -> Double? {
+    if let d = v as? Double { return d }
+    if let i = v as? Int { return Double(i) }
+    if let s = v as? String { return Double(s) }
+    return nil
 }

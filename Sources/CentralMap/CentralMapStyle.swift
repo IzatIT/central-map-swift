@@ -1,14 +1,44 @@
 import Foundation
 
-/// Сборка компактного стиля MapLibre над источником `central` (чистая подложка для
-/// оверлеев). Тайлы/шрифты несут API-ключ. MLNMapView загружает стиль по URL, поэтому
-/// JSON пишется во временный файл, и используется его file-URL.
+/// Слои карты для режима «показать списком» (`makeMapView(layers:)`, `showOnlyLayers(_:)`) и
+/// прежний встроенный стиль (устарело).
+///
+/// Карта берёт стиль сервера — тот же, что у сайта (`CentralMapConfig.styleURL(dark:)`), поэтому
+/// ключи слоёв те же, что в вебе (https://map.central.kg/docs, «Названия слоёв»). POI-категории
+/// (`poi.<class>` / `poigroup.<group>`) и `base.poi` включают все слои мест целиком.
 public enum CentralMapStyle {
 
-    /// Ключи слоёв для code-режима «показать списком» → id слоёв этого компактного стиля.
-    /// Нативный стиль проще веб-каталога, поэтому ключей меньше (см. доки «Названия слоёв»).
-    /// POI-категории (`poi.<class>` / `poigroup.<group>`) включают общий слой `poi`.
-    public static let layerKeys: [String: [String]] = [
+    /// id слоёв мест (значки и подписи) в стиле сервера.
+    public static let poiLayerIds: [String] = [
+        "transport-roadside", "transport-roadside-label",
+        "poi-z11", "poi-z13", "poi-z14", "poi-z15", "poi-z16", "poi-z17", "poi-z18",
+    ]
+
+    // Ключ → id слоёв стиля сервера (как каталог сайта, src/centralCatalog.ts фронта карты).
+    private static let serverKeys: [String: [String]] = [
+        "base.buildings": ["building-fill", "building-3d"],
+        "base.roads": ["road-casing-minor", "road-casing-major", "road-fill-minor", "road-fill-major",
+                       "road-path", "road-centerline", "road-oneway", "bridge", "roadtunnel"],
+        "base.road_labels": ["road-label"],
+        "base.traffic_signals": ["roadsign-signals"],
+        "base.road_signs": ["roadsign-priority", "crossing-zebra", "barrier"],
+        "base.rivers": ["waterway", "hl-waterway-label"],
+        "base.water": ["water-fill", "water-outline", "water_struct", "hl-water-name"],
+        "base.green": ["landcover-green", "tree"],
+        "base.builtup": ["landcover-builtup", "landcover-farm", "landcover-sand", "landcover-ice", "landcover-wetland"],
+        "base.terrain": ["hillshade", "peak-circle", "peak-label", "natural_line", "natpoi-circle", "natpoi-label"],
+        "base.railway": ["railway", "aerialway", "piste"],
+        "base.aeroway": ["aeroway", "aeroway-poly"],
+        "base.parking": ["parking-area"],
+        "base.power": ["power"],
+        "base.military": ["military"],
+        "base.boundaries": ["boundary-admin"],
+        "base.places": ["place-city", "place-town", "place-village", "place-suburb", "place-minor"],
+        "base.poi": poiLayerIds,
+    ]
+
+    // id прежнего встроенного стиля (свои тайлы, tilesURL): с ним ключи тоже работают.
+    private static let legacyKeys: [String: [String]] = [
         "base.green": ["landcover"],
         "base.water": ["water"],
         "base.roads": ["road", "road-casing"],
@@ -17,21 +47,46 @@ public enum CentralMapStyle {
         "base.poi": ["poi"],
     ]
 
-    /// id всех переключаемых слоёв (фон `bg` всегда виден).
-    public static let toggleableIds: Set<String> = ["landcover", "water", "road", "road-casing", "building", "place-labels", "poi"]
+    /// Ключ слоя (`base.*`) → id слоёв: стиля сервера и прежнего встроенного (лишние id карта не найдёт).
+    public static let layerKeys: [String: [String]] = serverKeys.merging(legacyKeys) { $0 + $1 }
 
-    /// По списку ключей → множество видимых id (poi.* / poigroup.* включают слой `poi`).
+    /// id всех переключаемых слоёв (фон, подсветки `hl-*` и `admin-hit` всегда на месте).
+    public static let toggleableIds: Set<String> = Set(layerKeys.values.joined())
+
+    /// По списку ключей → множество видимых id (poi.* / poigroup.* включают все слои мест).
     public static func visibleLayerIds(for only: [String]) -> Set<String> {
         var ids = Set<String>()
         for k in only {
             if let m = layerKeys[k] { ids.formUnion(m) }
-            else if k.hasPrefix("poi.") || k.hasPrefix("poigroup.") { ids.insert("poi") }
+            else if k.hasPrefix("poi.") || k.hasPrefix("poigroup.") { ids.formUnion(layerKeys["base.poi"] ?? []) }
         }
         return ids
     }
 
-    /// Стиль как словарь JSON. `only` — показать ТОЛЬКО эти слои списком (см. layerKeys).
+    /// Какой стиль грузить: свой адрес → прежний встроенный стиль, если заданы свои тайлы
+    /// (устаревший `tilesURL`, как в 0.1) → стиль сервера по теме.
+    static func resolvedStyleURL(_ config: CentralMapConfig, dark: Bool, only: [String]?, custom: URL?) -> URL {
+        if let custom { return custom }
+        if config.customTilesURL != nil { return legacyStyleFileURL(config, dark: dark, only: only) }
+        return config.styleURL(dark: dark)
+    }
+
+    /// Прежний встроенный компактный стиль как словарь JSON. Карта больше его не берёт: стиль —
+    /// с сервера (`CentralMapConfig.styleURL(dark:)`).
+    @available(*, deprecated, message: "Стиль карты — с сервера: CentralMapConfig.styleURL(dark:). Встроенный стиль SDK берёт только для своих тайлов (tilesURL).")
     public static func json(_ config: CentralMapConfig, dark: Bool = false, only: [String]? = nil) -> [String: Any] {
+        legacyJSON(config, dark: dark, only: only)
+    }
+
+    /// Записать прежний встроенный стиль во временный файл и вернуть его URL.
+    @available(*, deprecated, message: "Стиль карты — с сервера: CentralMapConfig.styleURL(dark:). Встроенный стиль SDK берёт только для своих тайлов (tilesURL).")
+    public static func temporaryStyleURL(_ config: CentralMapConfig, dark: Bool = false, only: [String]? = nil) -> URL {
+        legacyStyleFileURL(config, dark: dark, only: only)
+    }
+
+    // MARK: - Прежний встроенный стиль (0.1): тайлы/шрифты без ключа, лист значков сервера по теме
+
+    static func legacyJSON(_ config: CentralMapConfig, dark: Bool, only: [String]?) -> [String: Any] {
         let p = dark ? darkPalette : lightPalette
         var layers: [[String: Any]] = [
             ["id": "bg", "type": "background", "paint": ["background-color": p.bg]],
@@ -55,9 +110,10 @@ public enum CentralMapStyle {
                         "text-size": ["interpolate", ["linear"], ["zoom"], 4, 11, 10, 15, 14, 19],
                         "text-max-width": 8],
              "paint": ["text-color": p.text, "text-halo-color": p.textHalo, "text-halo-width": 1.4]],
+            // значки листа сервера ~30 px — размер 0.8–1
             ["id": "poi", "type": "symbol", "source": "central", "source-layer": "poi", "minzoom": 14,
              "layout": ["icon-image": ["coalesce", ["get", "class"], "marker"],
-                        "icon-size": ["interpolate", ["linear"], ["zoom"], 14, 0.5, 18, 0.62],
+                        "icon-size": ["interpolate", ["linear"], ["zoom"], 14, 0.8, 18, 1.0],
                         "icon-allow-overlap": false, "text-optional": true,
                         "text-field": ["coalesce", ["get", "name:ru"], ["get", "name"]],
                         "text-font": ["Noto Sans Regular"], "text-size": 11,
@@ -78,12 +134,12 @@ public enum CentralMapStyle {
         return [
             "version": 8,
             "name": dark ? "central-dark" : "central-light",
-            "glyphs": config.fontsTemplate,
-            "sprite": config.spriteTemplate,
+            "glyphs": config.legacyFontsTemplate,
+            "sprite": config.legacySpriteURL(dark: dark),
             "sources": [
                 "central": [
                     "type": "vector",
-                    "tiles": [config.tilesTemplate],
+                    "tiles": [config.legacyTilesTemplate],
                     "minzoom": 0,
                     "maxzoom": 14,
                     "attribution": "© OpenStreetMap contributors",
@@ -93,13 +149,13 @@ public enum CentralMapStyle {
         ]
     }
 
-    /// Записать стиль во временный файл и вернуть его URL (для MLNMapView styleURL).
-    public static func temporaryStyleURL(_ config: CentralMapConfig, dark: Bool = false, only: [String]? = nil) -> URL {
-        let dict = json(config, dark: dark, only: only)
+    /// MLNMapView грузит стиль по URL, поэтому JSON пишется во временный файл.
+    static func legacyStyleFileURL(_ config: CentralMapConfig, dark: Bool, only: [String]?) -> URL {
+        let dict = legacyJSON(config, dark: dark, only: only)
         let data = (try? JSONSerialization.data(withJSONObject: dict)) ?? Data("{}".utf8)
-        // Уникальное имя по конфигу (ключ/база/тема/набор слоёв), чтобы две карты с разными
-        // ключами/наборами не перетирали один файл и MapLibre не отдавал устаревший стиль.
-        let tag = abs("\(config.tilesTemplate)|\(config.fontsTemplate)|\((only ?? []).sorted().joined(separator: ","))".hashValue)
+        // Уникальное имя по конфигу (база/тайлы/тема/набор слоёв), чтобы две карты с разными
+        // настройками не перетирали один файл и MapLibre не отдавал устаревший стиль.
+        let tag = UInt(bitPattern: "\(config.legacyTilesTemplate)|\(config.legacyFontsTemplate)|\((only ?? []).sorted().joined(separator: ","))".hashValue)
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("central-map-\(dark ? "dark" : "light")-\(tag).json")
         try? data.write(to: url)

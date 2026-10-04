@@ -1,0 +1,47 @@
+# Сборка и тесты CentralMap на iOS Simulator (публичное зеркало IzatIT/central-map-swift).
+# MapLibre Native iOS — бинарный XCFramework только под iOS: `swift build` на macOS его не соберёт,
+# поэтому — xcodebuild под iOS Simulator. В монорепо этот файл не действует (лежит не в корне).
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode и схемы пакета
+        run: |
+          xcodebuild -version
+          xcodebuild -list
+
+      - name: Сборка (iOS Simulator)
+        run: xcodebuild build -quiet -scheme CentralMap -destination 'generic/platform=iOS Simulator'
+
+      - name: Тесты (iOS Simulator)
+        run: |
+          # новейший доступный iPhone-симулятор
+          udid=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devs = json.load(sys.stdin)["devices"]
+          ver = lambda k: [int(x) for x in k.rsplit("iOS-", 1)[-1].split("-") if x.isdigit()]
+          for k in sorted((k for k in devs if ".iOS-" in k), key=ver, reverse=True):
+              for d in devs[k]:
+                  if d["name"].startswith("iPhone"):
+                      print(d["udid"]); sys.exit()
+          ')
+          [ -n "$udid" ] || { echo "нет iPhone-симулятора"; xcrun simctl list devices available; exit 1; }
+          echo "симулятор: $udid"
+          # у пакета с одним продуктом тесты в схеме CentralMap; если Xcode сделал общую схему — в ней
+          scheme=CentralMap
+          if xcodebuild -list | grep -q "CentralMap-Package"; then scheme=CentralMap-Package; fi
+          xcodebuild test -quiet -scheme "$scheme" -destination "id=$udid"

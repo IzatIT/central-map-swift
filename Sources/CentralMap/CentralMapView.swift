@@ -4,7 +4,8 @@ import MapLibre
 import SwiftUI
 
 /// SwiftUI-карта central.kg. Через `onReady` отдаёт `CentralMapController` — добавляйте
-/// маркеры и линии.
+/// маркеры и линии. Стиль — с сервера, как у сайта (`dark` — тёмная тема); `layers` — показать
+/// только эти слои; `minZoom` — наименьший масштаб (по умолчанию 2); `styleURL` — свой стиль.
 ///
 /// ```swift
 /// CentralMap(config: CentralMapConfig(apiKey: "ck_map_…"), dark: true) { map in
@@ -21,17 +22,26 @@ public struct CentralMap: UIViewRepresentable {
     private let dark: Bool
     private let center: CLLocationCoordinate2D
     private let zoom: Double
+    private let layers: [String]?
+    private let minZoom: Double
+    private let styleURL: URL?
     private let onReady: ((CentralMapController) -> Void)?
 
     public init(config: CentralMapConfig,
                 dark: Bool = false,
                 center: CLLocationCoordinate2D = .kgCenter,
                 zoom: Double = 6,
+                layers: [String]? = nil,
+                minZoom: Double = CentralMapConfig.defaultMinZoom,
+                styleURL: URL? = nil,
                 onReady: ((CentralMapController) -> Void)? = nil) {
         self.config = config
         self.dark = dark
         self.center = center
         self.zoom = zoom
+        self.layers = layers
+        self.minZoom = minZoom
+        self.styleURL = styleURL
         self.onReady = onReady
     }
 
@@ -42,7 +52,8 @@ public struct CentralMap: UIViewRepresentable {
     public func makeUIView(context: Context) -> MLNMapView {
         let controller = context.coordinator
         controller.onReady = onReady
-        return controller.makeMapView(dark: dark, center: center, zoom: zoom)
+        return controller.makeMapView(dark: dark, center: center, zoom: zoom,
+                                      layers: layers, minZoom: minZoom, styleURL: styleURL)
     }
 
     public func updateUIView(_ uiView: MLNMapView, context: Context) {}

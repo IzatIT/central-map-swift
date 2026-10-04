@@ -16,7 +16,13 @@ public final class CentralAnnotation: MLNPointAnnotation {
 
 /// Создаёт и обслуживает MLNMapView для central.kg: маркеры (цветные булавки) и линии
 /// (через source + line-layer). Используется и в UIKit, и как coordinator в SwiftUI.
+///
+/// Стиль — с сервера, тот же, что у сайта (`https://map.central.kg/style/{light,dark}.json`):
+/// значки, шрифты, рельеф и версия тайлов приходят вместе с ним, ключ не нужен.
 public final class CentralMapController: NSObject, MLNMapViewDelegate {
+
+    /// Шрифт подписей SDK (числа в кластерах) — есть на сервере шрифтов карты.
+    static let labelFont = "Noto Sans Regular"
 
     public let config: CentralMapConfig
     public private(set) weak var mapView: MLNMapView?
@@ -26,24 +32,34 @@ public final class CentralMapController: NSObject, MLNMapViewDelegate {
     private var styleLoaded = false
     private var pending: [(MLNStyle) -> Void] = []
     private var lineCounter = 0
+    /// Набор «только эти слои»: применяется при каждой загрузке стиля.
+    private var onlyLayers: [String]?
 
     public init(config: CentralMapConfig) {
         self.config = config
     }
 
     /// Создать сконфигурированный MLNMapView.
-    /// `layers` — показать ТОЛЬКО эти слои списком (ключи base.* / poi.* / poigroup.*), без панели.
+    /// - Parameters:
+    ///   - dark: тёмная тема стиля (`dark.json`), иначе светлая (`light.json`).
+    ///   - layers: показать ТОЛЬКО эти слои списком (ключи base.* / poi.* / poigroup.*), без панели.
+    ///   - minZoom: наименьший масштаб карты (по умолчанию `CentralMapConfig.defaultMinZoom` = 2).
+    ///   - styleURL: свой стиль вместо стиля сервера.
     public func makeMapView(dark: Bool = false,
                             center: CLLocationCoordinate2D = .kgCenter,
                             zoom: Double = 6,
-                            layers: [String]? = nil) -> MLNMapView {
-        let url = CentralMapStyle.temporaryStyleURL(config, dark: dark, only: layers)
+                            layers: [String]? = nil,
+                            minZoom: Double = CentralMapConfig.defaultMinZoom,
+                            styleURL: URL? = nil) -> MLNMapView {
+        let url = CentralMapStyle.resolvedStyleURL(config, dark: dark, only: layers, custom: styleURL)
         let mv = MLNMapView(frame: .zero, styleURL: url)
         mv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        mv.setCenter(center, zoomLevel: zoom, animated: false)
+        mv.minimumZoomLevel = minZoom
+        mv.setCenter(center, zoomLevel: max(zoom, minZoom), animated: false)
         mv.logoView.isHidden = true          // без вотермарки MapLibre
         mv.attributionButton.isHidden = true // без кнопки (i) с атрибуцией
         mv.delegate = self
+        onlyLayers = layers
         self.mapView = mv
         return mv
     }
@@ -51,20 +67,26 @@ public final class CentralMapController: NSObject, MLNMapViewDelegate {
     // MARK: - Слои
 
     /// Показать ТОЛЬКО перечисленные слои на живой карте (ключи base.* / poi.* / poigroup.*),
-    /// всё остальное скрыть. Менять набор можно в любой момент после загрузки стиля.
+    /// всё остальное скрыть. Набор можно менять в любой момент; до загрузки стиля он применится,
+    /// как только стиль загрузится.
     public func showOnlyLayers(_ keys: [String]) {
+        onlyLayers = keys
         guard let style = mapView?.style else { return }
-        let vis = CentralMapStyle.visibleLayerIds(for: keys)
-        for id in CentralMapStyle.toggleableIds {
-            style.layer(withIdentifier: id)?.isVisible = vis.contains(id)
+        Self.applyOnly(keys, to: style)
+    }
+
+    /// Показать/скрыть один слой по ключу (напр. `base.roads`; `base.poi`, `poi.*`, `poigroup.*` — все места).
+    public func setLayerVisible(_ key: String, _ visible: Bool) {
+        guard let style = mapView?.style else { return }
+        for id in CentralMapStyle.visibleLayerIds(for: [key]) {
+            style.layer(withIdentifier: id)?.isVisible = visible
         }
     }
 
-    /// Показать/скрыть один слой по ключу (напр. `base.roads`, `base.poi`).
-    public func setLayerVisible(_ key: String, _ visible: Bool) {
-        guard let style = mapView?.style else { return }
-        for id in CentralMapStyle.layerKeys[key] ?? [] {
-            style.layer(withIdentifier: id)?.isVisible = visible
+    private static func applyOnly(_ keys: [String], to style: MLNStyle) {
+        let vis = CentralMapStyle.visibleLayerIds(for: keys)
+        for id in CentralMapStyle.toggleableIds {
+            style.layer(withIdentifier: id)?.isVisible = vis.contains(id)
         }
     }
 
@@ -214,6 +236,8 @@ public final class CentralMapController: NSObject, MLNMapViewDelegate {
             let count = MLNSymbolStyleLayer(identifier: "\(id)-count", source: source)
             count.predicate = NSPredicate(format: "cluster == YES")
             count.text = NSExpression(format: "CAST(point_count, 'NSString')")
+            // шрифт сервера карты: шрифта MapLibre по умолчанию (Open Sans) там нет — число не рисовалось
+            count.textFontNames = NSExpression(forConstantValue: [CentralMapController.labelFont])
             count.textColor = NSExpression(forConstantValue: UIColor.white)
             count.textFontSize = NSExpression(forConstantValue: 12)
             style.addLayer(count)
@@ -248,6 +272,8 @@ public final class CentralMapController: NSObject, MLNMapViewDelegate {
 
     public func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
         styleLoaded = true
+        // слои списком: стиль сервера грузится по адресу — набор применяется после загрузки
+        if let keys = onlyLayers { Self.applyOnly(keys, to: style) }
         pending.forEach { $0(style) }
         pending.removeAll()
         onReady?(self)

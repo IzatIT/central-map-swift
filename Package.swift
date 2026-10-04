@@ -13,6 +13,7 @@ let package = Package(
         ),
     ],
     dependencies: [
+        // MapLibre Native iOS (бинарный XCFramework, только iOS). Модуль `import MapLibre`, классы MLN*.
         .package(
             url: "https://github.com/maplibre/maplibre-gl-native-distribution",
             from: "6.0.0"
@@ -24,6 +25,10 @@ let package = Package(
             dependencies: [
                 .product(name: "MapLibre", package: "maplibre-gl-native-distribution"),
             ]
+        ),
+        .testTarget(
+            name: "CentralMapTests",
+            dependencies: ["CentralMap"]
         ),
     ]
 )
