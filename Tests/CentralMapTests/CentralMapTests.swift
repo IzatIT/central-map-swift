@@ -177,7 +177,8 @@ final class StubProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
-/// meta и REST: путь, ключ заголовком, разбор ответа.
+/// meta и REST: путь, ключ заголовком, разбор ответа. CentralMapAPI — с iOS 15 / macOS 12 (async URLSession), как и в пакете.
+@available(iOS 15.0, macOS 12.0, *)
 final class CentralMapAPITests: XCTestCase {
 
     func testMetaParse() {

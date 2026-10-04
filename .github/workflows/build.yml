@@ -44,4 +44,10 @@ jobs:
           # у пакета с одним продуктом тесты в схеме CentralMap; если Xcode сделал общую схему — в ней
           scheme=CentralMap
           if xcodebuild -list | grep -q "CentralMap-Package"; then scheme=CentralMap-Package; fi
-          xcodebuild test -quiet -scheme "$scheme" -destination "id=$udid"
+          # упавшие тесты — в аннотации задачи (их видно через API без входа; лог задачи — только со входом)
+          set -o pipefail
+          xcodebuild test -quiet -scheme "$scheme" -destination "id=$udid" 2>&1 | tee test.log || {
+            grep -E "error:|failed|Fatal error|crash" test.log | grep -v "^Testing failed" | head -10 | while IFS= read -r l; do
+              l=${l//'%'/'%25'}; echo "::error::${l:0:900}"; done
+            exit 1
+          }
