@@ -34,6 +34,10 @@ public final class CentralMapController: NSObject, MLNMapViewDelegate {
     private var lineCounter = 0
     /// Набор «только эти слои»: применяется при каждой загрузке стиля.
     private var onlyLayers: [String]?
+    /// Слой объёмных зданий стиля сайта (fill-extrusion).
+    static let buildings3dId = "building-3d"
+    /// Здания разрешены набором слоёв (`base.buildings` не скрыт); сам объём показывается только при наклоне.
+    private var buildingsAllowed = true
 
     public init(config: CentralMapConfig) {
         self.config = config
@@ -71,16 +75,33 @@ public final class CentralMapController: NSObject, MLNMapViewDelegate {
     /// как только стиль загрузится.
     public func showOnlyLayers(_ keys: [String]) {
         onlyLayers = keys
+        buildingsAllowed = CentralMapStyle.visibleLayerIds(for: keys).contains(Self.buildings3dId)
         guard let style = mapView?.style else { return }
         Self.applyOnly(keys, to: style)
+        syncBuildings3d()
     }
 
     /// Показать/скрыть один слой по ключу (напр. `base.roads`; `base.poi`, `poi.*`, `poigroup.*` — все места).
     public func setLayerVisible(_ key: String, _ visible: Bool) {
         guard let style = mapView?.style else { return }
-        for id in CentralMapStyle.visibleLayerIds(for: [key]) {
+        let ids = CentralMapStyle.visibleLayerIds(for: [key])
+        for id in ids {
             style.layer(withIdentifier: id)?.isVisible = visible
         }
+        if ids.contains(Self.buildings3dId) {
+            buildingsAllowed = visible
+            syncBuildings3d()
+        }
+    }
+
+    /// Объём зданий — как на сайте. Публичный стиль приходит в стартовом виде сайта (2D): у fill-extrusion
+    /// `building-3d` стоит фильтр «ничего не матчит» (осм_id == −1), а сайт включает объём при наклоне. Здесь
+    /// фильтр снимается при загрузке стиля, а слой показывается только при наклоне камеры (pitch > 1°): сверху
+    /// объёма не видно, а слой — самый тяжёлый в городе.
+    private func syncBuildings3d() {
+        guard let mv = mapView, let layer = mv.style?.layer(withIdentifier: Self.buildings3dId) else { return }
+        let want = buildingsAllowed && mv.camera.pitch > 1
+        if layer.isVisible != want { layer.isVisible = want }
     }
 
     private static func applyOnly(_ keys: [String], to style: MLNStyle) {
@@ -274,9 +295,20 @@ public final class CentralMapController: NSObject, MLNMapViewDelegate {
         styleLoaded = true
         // слои списком: стиль сервера грузится по адресу — набор применяется после загрузки
         if let keys = onlyLayers { Self.applyOnly(keys, to: style) }
+        // объём зданий: снять фильтр 2D сайта, показывать по наклону (см. syncBuildings3d)
+        (style.layer(withIdentifier: Self.buildings3dId) as? MLNVectorStyleLayer)?.predicate = nil
+        syncBuildings3d()
         pending.forEach { $0(style) }
         pending.removeAll()
         onReady?(self)
+    }
+
+    public func mapView(_ mapView: MLNMapView, regionIsChangingWith reason: MLNCameraChangeReason) {
+        syncBuildings3d() // наклон жестом или анимацией — объём зданий следует за камерой
+    }
+
+    public func mapView(_ mapView: MLNMapView, regionDidChangeAnimated animated: Bool) {
+        syncBuildings3d()
     }
 
     public func mapView(_ mapView: MLNMapView, viewFor annotation: MLNAnnotation) -> MLNAnnotationView? {
